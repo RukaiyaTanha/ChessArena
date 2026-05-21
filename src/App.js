@@ -53,20 +53,14 @@ function App() {
 
   return (
     <div className="relative">
-      {/* Leaderboard Button (floating) */}
-      {user && currentView !== 'login' && (
-        <button
-          onClick={() => setShowLeaderboard(true)}
-          className="fixed top-4 right-4 z-40 bg-gradient-to-r from-yellow-500 to-orange-600 text-white font-semibold py-2 px-4 rounded-lg hover:from-yellow-600 hover:to-orange-700 transition-all transform hover:scale-105 shadow-lg"
-        >
-          🏆 Leaderboard
-        </button>
-      )}
-
       {/* Views */}
       {currentView === 'login' && <Login onLogin={handleLogin} />}
       {currentView === 'lobby' && user && (
-        <Lobby user={user} onJoinGame={handleJoinGame} />
+        <Lobby
+          user={user}
+          onJoinGame={handleJoinGame}
+          onShowLeaderboard={() => setShowLeaderboard(true)}
+        />
       )}
       {currentView === 'game' && user && currentRoomId && (
         <GameRoom
@@ -74,6 +68,7 @@ function App() {
           playerColor={playerColor}
           user={user}
           onLeaveGame={handleLeaveGame}
+          onShowLeaderboard={() => setShowLeaderboard(true)}
         />
       )}
 

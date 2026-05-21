@@ -80,7 +80,7 @@ function Login({ onLogin }) {
         </form>
         
         <div className="mt-8 text-center text-gray-300 text-sm">
-          <p>Features: Player vs Player • Real-time • Chat • Timers</p>
+          <p>• Player vs Player • Real-time • Chat • Timers</p>
         </div>
       </div>
     </div>

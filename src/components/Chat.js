@@ -7,6 +7,15 @@ function Chat({ roomId, user, title = 'Chat' }) {
   const [newMessage, setNewMessage] = useState('');
   const messagesEndRef = useRef(null);
 
+  const formatMessageTime = (timestamp) => {
+    if (!timestamp) return '';
+
+    return new Intl.DateTimeFormat(undefined, {
+      dateStyle: 'medium',
+      timeStyle: 'short'
+    }).format(new Date(timestamp));
+  };
+
   useEffect(() => {
     const messagesRef = ref(database, `chats/${roomId}`);
     const unsubscribe = onValue(messagesRef, (snapshot) => {
@@ -70,7 +79,10 @@ function Chat({ roomId, user, title = 'Chat' }) {
                     : 'bg-white/20 text-white'
                 }`}
               >
-                <p className="text-xs font-semibold opacity-75">{msg.sender}</p>
+                <div className="mb-1 flex items-center justify-between gap-3 text-xs font-semibold opacity-75">
+                  <p>{msg.sender}</p>
+                  <p className="whitespace-nowrap">{formatMessageTime(msg.timestamp)}</p>
+                </div>
                 <p className="text-sm">{msg.text}</p>
               </div>
             </div>

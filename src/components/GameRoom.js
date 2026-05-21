@@ -1,5 +1,5 @@
-import { useState, useEffect, useCallback } from 'react';
-import { ref, onValue, set, get } from 'firebase/database';
+import { useState, useEffect, useCallback, useRef } from 'react';
+import { ref, onValue, set, get, runTransaction } from 'firebase/database';
 import { database } from '../firebase';
 import { 
   getInitialBoard, 
@@ -14,7 +14,16 @@ import {
 } from '../utils/chessLogic';
 import Chat from './Chat';
 
-function GameRoom({ roomId, playerColor, user, onLeaveGame }) {
+const ACTIVE_STATUSES = ['playing', 'check'];
+
+const hasKing = (board, color) =>
+  board.some((row) =>
+    row.some(
+      (piece) => piece && !piece.empty && piece.type === 'king' && piece.color === color
+    )
+  );
+
+function GameRoom({ roomId, playerColor, user, onLeaveGame, onShowLeaderboard }) {
   const [board, setBoard] = useState(getInitialBoard());
   const [selectedSquare, setSelectedSquare] = useState(null);
   const [possibleMoves, setPossibleMoves] = useState([]);
@@ -24,9 +33,11 @@ function GameRoom({ roomId, playerColor, user, onLeaveGame }) {
   const [whiteTime, setWhiteTime] = useState(600);
   const [blackTime, setBlackTime] = useState(600);
   const [roomData, setRoomData] = useState(null);
+  const gameEndedRef = useRef(false);
 
   // Load game state from Firebase
   useEffect(() => {
+    gameEndedRef.current = false;
     const roomRef = ref(database, `rooms/${roomId}`);
     const unsubscribe = onValue(roomRef, (snapshot) => {
       const data = snapshot.val();
@@ -71,79 +82,71 @@ function GameRoom({ roomId, playerColor, user, onLeaveGame }) {
     const whiteUid = data.players?.white?.uid;
     const blackUid = data.players?.black?.uid;
 
-    if (winnerColor === 'white' && whiteUid) {
-      const userRef = ref(database, `users/${whiteUid}`);
-      const snapshot = await get(userRef);
-      const userData = snapshot.val();
-      await set(userRef, {
-        ...userData,
-        wins: (userData.wins || 0) + 1
+    const updateUserRecord = async (uid, updater) => {
+      const userRef = ref(database, `users/${uid}`);
+      await runTransaction(userRef, (currentData) => {
+        const safeData = currentData || {};
+        return {
+          ...safeData,
+          ...updater(safeData),
+          lastUpdated: Date.now()
+        };
       });
+    };
+
+    if (winnerColor === 'white' && whiteUid) {
+      await updateUserRecord(whiteUid, (userData) => ({
+        wins: (userData.wins || 0) + 1
+      }));
 
       if (blackUid) {
-        const blackRef = ref(database, `users/${blackUid}`);
-        const blackSnapshot = await get(blackRef);
-        const blackData = blackSnapshot.val();
-        await set(blackRef, {
-          ...blackData,
+        await updateUserRecord(blackUid, (blackData) => ({
           losses: (blackData.losses || 0) + 1
-        });
+        }));
       }
     } else if (winnerColor === 'black' && blackUid) {
-      const userRef = ref(database, `users/${blackUid}`);
-      const snapshot = await get(userRef);
-      const userData = snapshot.val();
-      await set(userRef, {
-        ...userData,
+      await updateUserRecord(blackUid, (userData) => ({
         wins: (userData.wins || 0) + 1
-      });
+      }));
 
       if (whiteUid) {
-        const whiteRef = ref(database, `users/${whiteUid}`);
-        const whiteSnapshot = await get(whiteRef);
-        const whiteData = whiteSnapshot.val();
-        await set(whiteRef, {
-          ...whiteData,
+        await updateUserRecord(whiteUid, (whiteData) => ({
           losses: (whiteData.losses || 0) + 1
-        });
+        }));
       }
     } else if (winnerColor === 'draw') {
       // Handle draw
       if (whiteUid) {
-        const whiteRef = ref(database, `users/${whiteUid}`);
-        const whiteSnapshot = await get(whiteRef);
-        const whiteData = whiteSnapshot.val();
-        await set(whiteRef, {
-          ...whiteData,
+        await updateUserRecord(whiteUid, (whiteData) => ({
           draws: (whiteData.draws || 0) + 1
-        });
+        }));
       }
       if (blackUid) {
-        const blackRef = ref(database, `users/${blackUid}`);
-        const blackSnapshot = await get(blackRef);
-        const blackData = blackSnapshot.val();
-        await set(blackRef, {
-          ...blackData,
+        await updateUserRecord(blackUid, (blackData) => ({
           draws: (blackData.draws || 0) + 1
-        });
+        }));
       }
     }
   }, [roomId]);
 
   // Timer countdown
   useEffect(() => {
-    if (gameStatus !== 'playing') return;
+    if (!ACTIVE_STATUSES.includes(gameStatus)) return;
 
     const interval = setInterval(async () => {
+      if (gameEndedRef.current) return;
+
       if (currentTurn === COLORS.WHITE) {
         const newTime = whiteTime - 1;
         setWhiteTime(newTime);
         await set(ref(database, `rooms/${roomId}/players/white/timeRemaining`), newTime);
         
         if (newTime <= 0) {
-          await set(ref(database, `rooms/${roomId}/gameStatus`), 'timeout');
-          await set(ref(database, `rooms/${roomId}/winner`), 'black');
+          gameEndedRef.current = true;
           setGameStatus('timeout');
+          await set(ref(database, `rooms/${roomId}/gameStatus`), 'timeout');
+          await set(ref(database, `rooms/${roomId}/status`), 'finished');
+          await set(ref(database, `rooms/${roomId}/winner`), 'black');
           await updatePlayerStats('black');
         }
       } else {
@@ -152,9 +155,11 @@ function GameRoom({ roomId, playerColor, user, onLeaveGame }) {
         await set(ref(database, `rooms/${roomId}/players/black/timeRemaining`), newTime);
         
         if (newTime <= 0) {
-          await set(ref(database, `rooms/${roomId}/gameStatus`), 'timeout');
-          await set(ref(database, `rooms/${roomId}/winner`), 'white');
+          gameEndedRef.current = true;
           setGameStatus('timeout');
+          await set(ref(database, `rooms/${roomId}/gameStatus`), 'timeout');
+          await set(ref(database, `rooms/${roomId}/status`), 'finished');
+          await set(ref(database, `rooms/${roomId}/winner`), 'white');
           await updatePlayerStats('white');
         }
       }
@@ -167,8 +172,8 @@ function GameRoom({ roomId, playerColor, user, onLeaveGame }) {
     console.log('🎯 Square clicked:', { row, col, gameStatus, currentTurn, playerColor });
     console.log('Board structure check:', { boardLength: board.length, rowLength: board[0]?.length });
     
-    if (gameStatus !== 'playing') {
-      console.log('❌ Game is not in playing state:', gameStatus);
+    if (!ACTIVE_STATUSES.includes(gameStatus)) {
+      console.log('❌ Game is not active:', gameStatus);
       return;
     }
     if (currentTurn !== playerColor) {
@@ -193,13 +198,20 @@ function GameRoom({ roomId, playerColor, user, onLeaveGame }) {
         let newStatus = 'playing';
         let winner = null;
 
-        if (isCheckmate(newBoard, nextTurn)) {
+        if (!hasKing(newBoard, nextTurn)) {
           newStatus = 'checkmate';
           winner = currentTurn;
           await updatePlayerStats(currentTurn);
+          gameEndedRef.current = true;
+        } else if (isCheckmate(newBoard, nextTurn)) {
+          newStatus = 'checkmate';
+          winner = currentTurn;
+          await updatePlayerStats(currentTurn);
+          gameEndedRef.current = true;
         } else if (isStalemate(newBoard, nextTurn)) {
           newStatus = 'stalemate';
           await updatePlayerStats('draw');
+          gameEndedRef.current = true;
         } else if (isInCheck(newBoard, nextTurn)) {
           newStatus = 'check';
         }
@@ -221,6 +233,11 @@ function GameRoom({ roomId, playerColor, user, onLeaveGame }) {
         await set(ref(database, `rooms/${roomId}/gameStatus`), newStatus);
         if (winner) {
           await set(ref(database, `rooms/${roomId}/winner`), winner);
+          await set(ref(database, `rooms/${roomId}/status`), 'finished');
+        } else if (newStatus === 'stalemate') {
+          await set(ref(database, `rooms/${roomId}/status`), 'finished');
+        } else {
+          await set(ref(database, `rooms/${roomId}/status`), 'playing');
         }
 
         setSelectedSquare(null);
@@ -279,12 +296,20 @@ function GameRoom({ roomId, playerColor, user, onLeaveGame }) {
                 You are playing as {playerColor === COLORS.WHITE ? '♔ White' : '♚ Black'}
               </p>
             </div>
-            <button
-              onClick={onLeaveGame}
-              className="bg-red-600 text-white font-semibold py-2 px-4 rounded-lg hover:bg-red-700 transition"
-            >
-              Leave Game
-            </button>
+            <div className="flex items-center gap-3">
+              <button
+                onClick={onShowLeaderboard}
+                className="bg-gradient-to-r from-yellow-500 to-orange-600 text-white font-semibold py-2 px-4 rounded-lg hover:from-yellow-600 hover:to-orange-700 transition-all shadow-lg"
+              >
+                🏆 Leaderboard
+              </button>
+              <button
+                onClick={onLeaveGame}
+                className="bg-red-600 text-white font-semibold py-2 px-4 rounded-lg hover:bg-red-700 transition"
+              >
+                Leave Game
+              </button>
+            </div>
           </div>
         </div>
 
@@ -330,6 +355,27 @@ function GameRoom({ roomId, playerColor, user, onLeaveGame }) {
                 </div>
               )}
             </div>
+
+            {(gameStatus === 'checkmate' || gameStatus === 'stalemate' || gameStatus === 'timeout') && (
+              <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4">
+                <div className="max-w-md w-full rounded-2xl border border-white/20 bg-gradient-to-br from-gray-900 to-purple-900 p-6 text-center shadow-2xl">
+                  <h3 className="text-3xl font-bold text-white mb-3">
+                    {gameStatus === 'checkmate' ? 'Game Over' : gameStatus === 'timeout' ? 'Time Expired' : 'Draw'}
+                  </h3>
+                  <p className="text-gray-200 mb-6">
+                    {gameStatus === 'checkmate' && `${roomData?.winner === COLORS.WHITE ? '♔ White' : '♚ Black'} wins the match.`}
+                    {gameStatus === 'timeout' && `${roomData?.winner === COLORS.WHITE ? '♔ White' : '♚ Black'} wins on time.`}
+                    {gameStatus === 'stalemate' && 'The game ended in a draw.'}
+                  </p>
+                  <button
+                    onClick={onLeaveGame}
+                    className="bg-blue-600 text-white font-semibold py-3 px-6 rounded-lg hover:bg-blue-700 transition"
+                  >
+                    Back to Lobby
+                  </button>
+                </div>
+              </div>
+            )}
 
             {/* Timers */}
             <div className="grid grid-cols-2 gap-4">

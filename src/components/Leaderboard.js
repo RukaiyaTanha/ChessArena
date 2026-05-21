@@ -14,16 +14,21 @@ function Leaderboard({ onClose }) {
         const playerList = Object.entries(data).map(([uid, player]) => ({
           uid,
           ...player,
-          winRate: player.wins + player.losses > 0 
-            ? ((player.wins / (player.wins + player.losses)) * 100).toFixed(1)
+          wins: player.wins || 0,
+          losses: player.losses || 0,
+          draws: player.draws || 0,
+          winRate: (player.wins || 0) + (player.losses || 0) > 0 
+            ? (((player.wins || 0) / ((player.wins || 0) + (player.losses || 0))) * 100).toFixed(1)
             : 0,
-          totalGames: (player.wins || 0) + (player.losses || 0) + (player.draws || 0)
+          totalGames: (player.wins || 0) + (player.losses || 0) + (player.draws || 0),
+          lastUpdated: player.lastUpdated || 0
         }));
         
-        // Sort by wins, then by win rate
+        // Sort by wins, then win rate, then most recent result
         playerList.sort((a, b) => {
           if (b.wins !== a.wins) return b.wins - a.wins;
-          return b.winRate - a.winRate;
+          if (b.winRate !== a.winRate) return b.winRate - a.winRate;
+          return (b.lastUpdated || 0) - (a.lastUpdated || 0);
         });
         
         setPlayers(playerList);

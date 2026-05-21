@@ -5,7 +5,7 @@ import { getInitialBoard } from '../utils/chessLogic';
 import { COLORS } from '../utils/chessLogic';
 import Chat from './Chat';
 
-function Lobby({ user, onJoinGame }) {
+function Lobby({ user, onJoinGame, onShowLeaderboard }) {
   const [rooms, setRooms] = useState([]);
   const [showCreateRoom, setShowCreateRoom] = useState(false);
   const [roomName, setRoomName] = useState('');
@@ -21,7 +21,7 @@ function Lobby({ user, onJoinGame }) {
         const roomList = Object.entries(data).map(([id, room]) => ({
           id,
           ...room
-        }));
+        })).sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
         setRooms(roomList);
       } else {
         setRooms([]);
@@ -88,6 +88,11 @@ function Lobby({ user, onJoinGame }) {
       return;
     }
 
+    if (room.status === 'finished') {
+      alert('This game has already finished');
+      return;
+    }
+
     if (room.players?.black) {
       alert('Room is full');
       return;
@@ -109,22 +114,39 @@ function Lobby({ user, onJoinGame }) {
     await remove(ref(database, `rooms/${roomId}`));
   };
 
+  const formatCreatedAt = (createdAt) => {
+    if (!createdAt) return 'Recently created';
+
+    return new Intl.DateTimeFormat(undefined, {
+      dateStyle: 'medium',
+      timeStyle: 'short'
+    }).format(new Date(createdAt));
+  };
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-900 via-purple-900 to-violet-900 p-4">
       <div className="max-w-7xl mx-auto">
         {/* Header */}
         <div className="bg-white/10 backdrop-blur-lg rounded-2xl p-6 mb-6 border border-white/20">
-          <div className="flex justify-between items-center">
+          <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
             <div>
               <h1 className="text-3xl font-bold text-white">Game Lobby</h1>
               <p className="text-gray-300 mt-1">Welcome, {user.displayName}!</p>
             </div>
-            <button
-              onClick={() => setShowCreateRoom(true)}
-              className="bg-gradient-to-r from-green-500 to-emerald-600 text-white font-semibold py-3 px-6 rounded-lg hover:from-green-600 hover:to-emerald-700 transition-all transform hover:scale-105"
-            >
-              + Create Room
-            </button>
+            <div className="flex flex-col sm:flex-row gap-3">
+              <button
+                onClick={onShowLeaderboard}
+                className="bg-gradient-to-r from-yellow-500 to-orange-600 text-white font-semibold py-3 px-6 rounded-lg hover:from-yellow-600 hover:to-orange-700 transition-all transform hover:scale-105 shadow-lg"
+              >
+                🏆 Leaderboard
+              </button>
+              <button
+                onClick={() => setShowCreateRoom(true)}
+                className="bg-gradient-to-r from-green-500 to-emerald-600 text-white font-semibold py-3 px-6 rounded-lg hover:from-green-600 hover:to-emerald-700 transition-all transform hover:scale-105"
+              >
+                + Create Room
+              </button>
+            </div>
           </div>
         </div>
 
@@ -151,13 +173,13 @@ function Lobby({ user, onJoinGame }) {
                   <select
                     value={timeLimit}
                     onChange={(e) => setTimeLimit(Number(e.target.value))}
-                    className="w-full px-4 py-2 rounded-lg bg-white/10 border border-white/30 text-white focus:outline-none focus:ring-2 focus:ring-purple-500"
+                    className="w-full px-4 py-2 rounded-lg bg-white text-gray-900 border border-white/30 focus:outline-none focus:ring-2 focus:ring-purple-500"
                   >
-                    <option value={180}>3 minutes</option>
-                    <option value={300}>5 minutes</option>
-                    <option value={600}>10 minutes</option>
-                    <option value={900}>15 minutes</option>
-                    <option value={1800}>30 minutes</option>
+                    <option value={180} className="text-gray-900">3 minutes</option>
+                    <option value={300} className="text-gray-900">5 minutes</option>
+                    <option value={600} className="text-gray-900">10 minutes</option>
+                    <option value={900} className="text-gray-900">15 minutes</option>
+                    <option value={1800} className="text-gray-900">30 minutes</option>
                   </select>
                 </div>
                 {createError && <p className="text-red-400 text-sm">{createError}</p>}
@@ -209,6 +231,9 @@ function Lobby({ user, onJoinGame }) {
                           <p className="text-gray-400 text-sm">
                             Host: {room.hostName} • Time: {Math.floor(room.timeLimit / 60)} min
                           </p>
+                          <p className="text-gray-500 text-xs mt-1">
+                            Created: {formatCreatedAt(room.createdAt)}
+                          </p>
                           <div className="flex items-center gap-2 mt-2">
                             <span className="text-xs px-2 py-1 bg-blue-500/20 text-blue-300 rounded">
                               {room.players?.black ? '2/2 Players' : '1/2 Players'}
@@ -224,7 +249,14 @@ function Lobby({ user, onJoinGame }) {
                           </div>
                         </div>
                         <div className="flex gap-2">
-                          {room.host === user.uid ? (
+                          {room.status === 'finished' ? null : room.players?.white?.uid === user.uid || room.players?.black?.uid === user.uid ? (
+                            <button
+                              onClick={() => onJoinGame(room.id, room.players?.white?.uid === user.uid ? 'white' : 'black')}
+                              className="bg-blue-600 text-white font-semibold py-2 px-4 rounded-lg hover:bg-blue-700 transition"
+                            >
+                              Rejoin
+                            </button>
+                          ) : room.host === user.uid ? (
                             <button
                               onClick={() => deleteRoom(room.id)}
                               className="bg-red-600 text-white font-semibold py-2 px-4 rounded-lg hover:bg-red-700 transition"
@@ -237,13 +269,6 @@ function Lobby({ user, onJoinGame }) {
                               className="bg-purple-600 text-white font-semibold py-2 px-4 rounded-lg hover:bg-purple-700 transition"
                             >
                               Join
-                            </button>
-                          ) : room.players?.white?.uid === user.uid || room.players?.black?.uid === user.uid ? (
-                            <button
-                              onClick={() => onJoinGame(room.id, room.players?.white?.uid === user.uid ? 'white' : 'black')}
-                              className="bg-blue-600 text-white font-semibold py-2 px-4 rounded-lg hover:bg-blue-700 transition"
-                            >
-                              Rejoin
                             </button>
                           ) : null}
                         </div>
