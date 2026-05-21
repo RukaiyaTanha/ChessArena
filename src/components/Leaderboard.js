@@ -11,17 +11,35 @@ function Leaderboard({ onClose }) {
     const unsubscribe = onValue(usersRef, (snapshot) => {
       const data = snapshot.val();
       if (data) {
-        const playerList = Object.entries(data).map(([uid, player]) => ({
-          uid,
+        const groupedPlayers = Object.entries(data).reduce((acc, [uid, player]) => {
+          const username = (player.username || 'Unknown').trim();
+          const groupKey = username.toLowerCase();
+
+          if (!acc[groupKey]) {
+            acc[groupKey] = {
+              uid,
+              username,
+              wins: 0,
+              losses: 0,
+              draws: 0,
+              lastUpdated: 0
+            };
+          }
+
+          acc[groupKey].wins += player.wins || 0;
+          acc[groupKey].losses += player.losses || 0;
+          acc[groupKey].draws += player.draws || 0;
+          acc[groupKey].lastUpdated = Math.max(acc[groupKey].lastUpdated, player.lastUpdated || 0);
+
+          return acc;
+        }, {});
+
+        const playerList = Object.values(groupedPlayers).map((player) => ({
           ...player,
-          wins: player.wins || 0,
-          losses: player.losses || 0,
-          draws: player.draws || 0,
-          winRate: (player.wins || 0) + (player.losses || 0) > 0 
-            ? (((player.wins || 0) / ((player.wins || 0) + (player.losses || 0))) * 100).toFixed(1)
+          winRate: player.wins + player.losses > 0
+            ? ((player.wins / (player.wins + player.losses)) * 100).toFixed(1)
             : 0,
-          totalGames: (player.wins || 0) + (player.losses || 0) + (player.draws || 0),
-          lastUpdated: player.lastUpdated || 0
+          totalGames: player.wins + player.losses + player.draws
         }));
         
         // Sort by wins, then win rate, then most recent result
